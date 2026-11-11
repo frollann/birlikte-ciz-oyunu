@@ -12,7 +12,6 @@ const viewport = document.getElementById('viewport');
 
 let isDrawing = false;
 let peer, conn;
-let myColor = '#' + Math.floor(Math.random()*16777215).toString(16);
 
 let currentMode = 'pen';
 let currentColor = '#ec4899';
@@ -50,15 +49,34 @@ sizePicker.addEventListener('input', (e) => {
     sizeValue.innerText = currentSize;
 });
 
+// ÜST BARI GİZLE / GÖSTER FONKSİYONU
+let isToolbarVisible = true;
+function toggleToolbar() {
+    isToolbarVisible = !isToolbarVisible;
+    const toolbar = document.getElementById('toolbar');
+    const toggleIcon = document.getElementById('toggle-icon');
+    const toggleText = document.getElementById('toggle-text');
+
+    if (isToolbarVisible) {
+        toolbar.classList.remove('hidden');
+        toggleIcon.innerText = "🔼";
+        toggleText.innerText = "Barı Gizle";
+    } else {
+        toolbar.classList.add('hidden');
+        toggleIcon.innerText = "🔽";
+        toggleText.innerText = "Barı Aç";
+    }
+}
+
 function setMode(mode) {
     currentMode = mode;
     const penBtn = document.getElementById('btn-pen');
     const eraserBtn = document.getElementById('btn-eraser');
     const panBtn = document.getElementById('btn-pan');
 
-    penBtn.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition " + (mode === 'pen' ? "bg-pink-600 text-white" : "text-slate-400 hover:text-white");
-    eraserBtn.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition " + (mode === 'eraser' ? "bg-pink-600 text-white" : "text-slate-400 hover:text-white");
-    panBtn.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition " + (mode === 'pan' ? "bg-pink-600 text-white" : "text-slate-400 hover:text-white");
+    penBtn.className = "px-2.5 py-1 rounded-lg font-bold transition " + (mode === 'pen' ? "bg-pink-600 text-white" : "text-slate-400 hover:text-white");
+    eraserBtn.className = "px-2.5 py-1 rounded-lg font-bold transition " + (mode === 'eraser' ? "bg-pink-600 text-white" : "text-slate-400 hover:text-white");
+    panBtn.className = "px-2.5 py-1 rounded-lg font-bold transition " + (mode === 'pan' ? "bg-pink-600 text-white" : "text-slate-400 hover:text-white");
 
     viewport.style.cursor = (mode === 'pan') ? 'grab' : 'crosshair';
 }
@@ -100,29 +118,30 @@ function restoreCanvasState(dataUrl, callback) {
     img.src = dataUrl;
 }
 
-// --- İSTENİLEN NOKTAYA ZOOM (FOCUSED ZOOM) MANTIĞI ---
+// --- ZOOM VE NOKTA HİZALAMA MANTIĞI ---
 function updateTransform() {
     container.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
     document.getElementById('zoom-level').innerText = `${Math.round(scale * 100)}%`;
 }
 
 function zoomAtPoint(zoomFactor, clientX, clientY) {
+    const newScale = Math.min(Math.max(scale * zoomFactor, 0.4), 5);
+    if (newScale === scale) return;
+
     const rect = viewport.getBoundingClientRect();
     const x = clientX - rect.left;
     const y = clientY - rect.top;
 
-    const newScale = Math.min(Math.max(scale * zoomFactor, 0.4), 5);
-    if (newScale === scale) return;
-
     panX = x - (x - panX) * (newScale / scale);
     panY = y - (y - panY) * (newScale / scale);
     scale = newScale;
+
     updateTransform();
 }
 
 function zoomIn() {
     const rect = viewport.getBoundingClientRect();
-    zoomAtPoint(1.2, rect.width / 2, rect.height / 2);
+    zoomAtPoint(1.25, rect.width / 2, rect.height / 2);
 }
 
 function zoomOut() {
@@ -143,7 +162,7 @@ viewport.addEventListener('wheel', (e) => {
     zoomAtPoint(factor, e.clientX, e.clientY);
 }, { passive: false });
 
-// --- PAN VE FARE KONTROLLERİ ---
+// --- FARE VE PAN KONTROLLERİ ---
 viewport.addEventListener('mousedown', (e) => {
     if (e.button === 1 || currentMode === 'pan' || (e.button === 0 && isSpacePressed)) {
         isPanning = true;
@@ -169,7 +188,7 @@ window.addEventListener('mouseup', () => {
     }
 });
 
-// --- DOKUNMATİK / TABLET PICH-ZOOM ---
+// --- MOBİL / TABLET DOKUNMATİK DESTEĞİ ---
 viewport.addEventListener('touchstart', (e) => {
     if (e.touches.length === 2) {
         initialTouchDist = Math.hypot(
@@ -181,7 +200,7 @@ viewport.addEventListener('touchstart', (e) => {
         startX = e.touches[0].clientX - panX;
         startY = e.touches[0].clientY - panY;
     }
-});
+}, { passive: false });
 
 viewport.addEventListener('touchmove', (e) => {
     if (e.touches.length === 2) {
@@ -241,13 +260,15 @@ paintCanvas.addEventListener('touchstart', (e) => {
         saveState();
         startDraw(e.touches[0]); 
     }
-});
+}, { passive: false });
+
 paintCanvas.addEventListener('touchmove', (e) => { 
     if (e.touches.length === 1 && currentMode !== 'pan' && isDrawing) {
         e.preventDefault(); 
         drawing(e.touches[0]); 
     }
-});
+}, { passive: false });
+
 paintCanvas.addEventListener('touchend', stopDraw);
 
 function startDraw(e) {
