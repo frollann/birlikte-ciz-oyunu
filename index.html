@@ -2,13 +2,16 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Ortak Çizim Kaosu</title>
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body class="bg-slate-900 text-white flex flex-col items-center justify-center h-screen m-0 select-none overflow-hidden">
 
-    <!-- GİRİŞ EKRANI / ODA KURMA ALANI -->
+    <!-- GİRİŞ EKRANI -->
     <div id="menu-screen" class="flex flex-col gap-4 text-center bg-slate-800 p-8 rounded-2xl shadow-xl border border-slate-700 w-80">
         <h1 class="text-3xl font-extrabold text-pink-500">🎨 Ortak Çizim</h1>
         
@@ -33,7 +36,7 @@
         <button onclick="joinRoom()" class="bg-emerald-600 hover:bg-emerald-500 p-3 rounded-xl font-bold transition shadow-lg">Odaya Katıl</button>
     </div>
 
-    <!-- ODA KURULUNCA ÇIKAN POP-UP (MODAL) -->
+    <!-- ODA KURULUNCA ÇIKAN POP-UP -->
     <div id="room-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
         <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 w-80 text-center flex flex-col gap-4 shadow-2xl">
             <h2 class="text-xl font-bold text-pink-400">Oda Başarıyla Kuruldu! 🎉</h2>
@@ -49,11 +52,11 @@
         </div>
     </div>
 
-    <!-- OYUN & ÇİZİM Ekrani -->
+    <!-- OYUN & ÇİZİM EKRANI -->
     <div id="game-screen" class="hidden flex flex-col items-center gap-3 w-full h-full p-4 overflow-hidden">
         <div id="status" class="text-yellow-400 font-semibold text-sm shrink-0">Bağlantı bekleniyor...</div>
         
-        <!-- ARAÇ ÇUBUĞU (TOOLBAR) -->
+        <!-- ARAÇ ÇUBUĞU -->
         <div class="bg-slate-800 p-3 rounded-2xl border border-slate-700 flex flex-wrap items-center justify-center gap-3 text-sm shadow-xl z-10 shrink-0">
             <div class="flex items-center gap-2">
                 <label class="text-slate-400 font-bold text-xs">Renk:</label>
@@ -66,7 +69,7 @@
                 <span id="sizeValue" class="text-pink-400 font-mono w-4 font-bold text-xs">5</span>
             </div>
 
-            <!-- MODLAR (Kalem, Silgi, El/Kaydırma) -->
+            <!-- MODLAR -->
             <div class="flex gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700">
                 <button id="btn-pen" onclick="setMode('pen')" class="bg-pink-600 px-3 py-1.5 rounded-lg text-xs font-bold transition">Kalem</button>
                 <button id="btn-eraser" onclick="setMode('eraser')" class="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition">Silgi</button>
@@ -75,8 +78,8 @@
 
             <!-- GERİ AL / İLERİ AL -->
             <div class="flex gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700 text-xs">
-                <button onclick="undo()" class="px-2.5 py-1.5 rounded-lg font-bold bg-slate-800 hover:bg-slate-700 text-slate-300" title="Geri Al (Ctrl+Z)">↩️ Geri</button>
-                <button onclick="redo()" class="px-2.5 py-1.5 rounded-lg font-bold bg-slate-800 hover:bg-slate-700 text-slate-300" title="İleri Al (Ctrl+Y)">↪️ İleri</button>
+                <button onclick="undo()" class="px-2.5 py-1.5 rounded-lg font-bold bg-slate-800 hover:bg-slate-700 text-slate-300">↩️ Geri</button>
+                <button onclick="redo()" class="px-2.5 py-1.5 rounded-lg font-bold bg-slate-800 hover:bg-slate-700 text-slate-300">↪️ İleri</button>
             </div>
 
             <!-- ZOOM KONTROLLERİ -->
@@ -87,10 +90,8 @@
                 <button onclick="resetZoom()" class="px-2 py-1 rounded-lg text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-400">Sıfırla</button>
             </div>
 
-            <!-- GÜNÜN ŞABLONU -->
             <button onclick="loadDailyTemplate()" class="bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 px-3 py-1.5 rounded-xl font-bold text-white transition shadow text-xs">✨ Günün Şablonu</button>
 
-            <!-- Dosyadan Şablon Seç -->
             <label class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-xl font-bold cursor-pointer transition text-slate-200 text-xs shadow">
                 📁 Şablon Seç <input type="file" id="imageLoader" accept="image/*" class="hidden">
             </label>
@@ -100,21 +101,18 @@
             <button onclick="downloadCanvas()" class="bg-purple-600 hover:bg-purple-500 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow">📥 İndir</button>
         </div>
 
-        <!-- TUVAL DIŞ ÇERÇEVESİ (Pan & Zoom Alanı) -->
+        <!-- TUVAL DIŞ ÇERÇEVESİ -->
         <div id="viewport" class="relative w-full flex-grow flex items-center justify-center overflow-hidden bg-slate-950/60 rounded-2xl border border-slate-800 cursor-crosshair">
             <!-- İKİ KATMANLI KANVAS ALANI -->
-            <div class="relative bg-white shadow-2xl origin-center transition-transform duration-75" id="canvas-container" style="width: 600px; height: 600px;">
-                <!-- Alt Katman: Boyamalar ve Çizimler -->
+            <div class="relative bg-white shadow-2xl transition-transform duration-75" id="canvas-container" style="width: 600px; height: 600px; transform-origin: 0 0;">
                 <canvas id="paintCanvas" class="absolute top-0 left-0 touch-none"></canvas>
-                
-                <!-- Üst Katman: Şablon Çizgileri -->
                 <canvas id="templateCanvas" class="absolute top-0 left-0 pointer-events-none" style="mix-blend-mode: multiply;"></canvas>
             </div>
         </div>
-        <div class="text-xs text-slate-400 shrink-0 pb-1">💡 İpucu: **Ctrl+Z** (Geri Al), **Ctrl+Y** (İleri Al). "✋ El" modunu seçerek veya **Space** tuşuna basılı tutarak tuvalde gezinebilirsin.</div>
+        <div class="text-xs text-slate-400 shrink-0 pb-1">💡 İpucu: **Ctrl+Z** / **Ctrl+Y**. İstediğiniz noktaya odaklanarak zoom yapabilirsiniz.</div>
     </div>
 
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- Harici JavaScript Dosyası Bağlantısı -->
     <script src="app.js"></script>
 </body>
 </html>
