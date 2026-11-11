@@ -1,26 +1,24 @@
-// Çift Katman Tanımlamaları
 const paintCanvas = document.getElementById('paintCanvas');
 const paintCtx = paintCanvas.getContext('2d');
 
 const templateCanvas = document.getElementById('templateCanvas');
 const templateCtx = templateCanvas.getContext('2d');
 
-const container = document.getElementById('canvas-container');
-const viewport = document.getElementById('viewport');
-
-// İki katmanda da piksellerin bulanıklaşmasını engelle (Keskin görünüm için)
 paintCtx.imageSmoothingEnabled = false;
 templateCtx.imageSmoothingEnabled = false;
+
+const container = document.getElementById('canvas-container');
+const viewport = document.getElementById('viewport');
 
 let isDrawing = false;
 let peer, conn;
 let myColor = '#' + Math.floor(Math.random()*16777215).toString(16);
 
-let currentMode = 'pen'; // 'pen', 'eraser', 'pan'
+let currentMode = 'pen';
 let currentColor = '#ec4899';
 let currentSize = 5;
 
-// ZOOM VE PAN (KAYDIRMA) DEĞİŞKENLERİ
+// ZOOM VE PAN DEĞİŞKENLERİ
 let scale = 1;
 let panX = 0;
 let panY = 0;
@@ -28,21 +26,14 @@ let isPanning = false;
 let startX = 0;
 let startY = 0;
 let isSpacePressed = false;
-
-// DOKUNMATİK (MOBİL) ÇİFT PARMAK DESTEĞİ İÇİN
 let initialTouchDist = 0;
 
-// GERİ AL / İLERİ AL (UNDO / REDO) GEÇMİŞİ
 let historyStack = [];
 let redoStack = [];
 const MAX_HISTORY = 25;
 
-// GÜNLÜK ŞABLON HAVUZU
 const dailyTemplates = [
-    "https://i.imgur.com/GaoX12l.jpeg",
-    "https://i.imgur.com/n2cMVJG.jpeg",
-    "https://i.imgur.com/Rde3EYa.jpeg",
-    "https://i.imgur.com/NAhN7ge.jpeg"
+    "https://i.imgur.com/NAhN7ge.jpg", 
 ];
 
 const colorPicker = document.getElementById('colorPicker');
@@ -72,23 +63,17 @@ function setMode(mode) {
     viewport.style.cursor = (mode === 'pan') ? 'grab' : 'crosshair';
 }
 
-// --- UNDO / REDO (GERİ AL / İLERİ AL) MANTIĞI ---
 function saveState() {
     if (paintCanvas.width === 0 || paintCanvas.height === 0) return;
     historyStack.push(paintCanvas.toDataURL());
-    if (historyStack.length > MAX_HISTORY) {
-        historyStack.shift();
-    }
+    if (historyStack.length > MAX_HISTORY) historyStack.shift();
     redoStack = [];
 }
 
 function undo(broadcast = true) {
     if (historyStack.length === 0) return;
-    
     redoStack.push(paintCanvas.toDataURL());
-    const previousStateUrl = historyStack.pop();
-    
-    restoreCanvasState(previousStateUrl, () => {
+    restoreCanvasState(historyStack.pop(), () => {
         if (broadcast && conn && conn.open) {
             conn.send({ type: 'sync_paint_state', dataUrl: paintCanvas.toDataURL() });
         }
@@ -97,11 +82,8 @@ function undo(broadcast = true) {
 
 function redo(broadcast = true) {
     if (redoStack.length === 0) return;
-    
     historyStack.push(paintCanvas.toDataURL());
-    const nextStateUrl = redoStack.pop();
-    
-    restoreCanvasState(nextStateUrl, () => {
+    restoreCanvasState(redoStack.pop(), () => {
         if (broadcast && conn && conn.open) {
             conn.send({ type: 'sync_paint_state', dataUrl: paintCanvas.toDataURL() });
         }
@@ -118,65 +100,50 @@ function restoreCanvasState(dataUrl, callback) {
     img.src = dataUrl;
 }
 
-// Klavye Kısayolları (Ctrl+Z, Ctrl+Y, Space)
-window.addEventListener('keydown', (e) => {
-    if (document.activeElement.tagName === 'INPUT') return;
-
-    if (e.ctrlKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        undo();
-    } else if (e.ctrlKey && e.key.toLowerCase() === 'y') {
-        e.preventDefault();
-        redo();
-    } else if (e.code === 'Space' && !isSpacePressed) {
-        isSpacePressed = true;
-        viewport.style.cursor = 'grab';
-    }
-});
-
-window.addEventListener('keyup', (e) => {
-    if (e.code === 'Space') {
-        isSpacePressed = false;
-        viewport.style.cursor = (currentMode === 'pan') ? 'grab' : 'crosshair';
-    }
-});
-
-// --- ZOOM & PAN MANTIĞI ---
+// --- İSTENİLEN NOKTAYA ZOOM (FOCUSED ZOOM) MANTIĞI ---
 function updateTransform() {
     container.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
     document.getElementById('zoom-level').innerText = `${Math.round(scale * 100)}%`;
 }
 
-function zoomIn() {
-    scale = Math.min(scale + 0.25, 5);
+function zoomAtPoint(zoomFactor, clientX, clientY) {
+    const rect = viewport.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    const newScale = Math.min(Math.max(scale * zoomFactor, 0.4), 5);
+    if (newScale === scale) return;
+
+    panX = x - (x - panX) * (newScale / scale);
+    panY = y - (y - panY) * (newScale / scale);
+    scale = newScale;
     updateTransform();
 }
 
+function zoomIn() {
+    const rect = viewport.getBoundingClientRect();
+    zoomAtPoint(1.2, rect.width / 2, rect.height / 2);
+}
+
 function zoomOut() {
-    scale = Math.max(scale - 0.25, 0.4);
-    updateTransform();
+    const rect = viewport.getBoundingClientRect();
+    zoomAtPoint(0.8, rect.width / 2, rect.height / 2);
 }
 
 function resetZoom() {
     scale = 1;
-    panX = 0;
-    panY = 0;
+    panX = (viewport.clientWidth - paintCanvas.width) / 2;
+    panY = (viewport.clientHeight - paintCanvas.height) / 2;
     updateTransform();
 }
 
 viewport.addEventListener('wheel', (e) => {
-    if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-        scale = Math.min(Math.max(scale * zoomFactor, 0.4), 5);
-        updateTransform();
-    } else {
-        panX -= e.deltaX;
-        panY -= e.deltaY;
-        updateTransform();
-    }
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.15 : 0.85;
+    zoomAtPoint(factor, e.clientX, e.clientY);
 }, { passive: false });
 
+// --- PAN VE FARE KONTROLLERİ ---
 viewport.addEventListener('mousedown', (e) => {
     if (e.button === 1 || currentMode === 'pan' || (e.button === 0 && isSpacePressed)) {
         isPanning = true;
@@ -202,14 +169,14 @@ window.addEventListener('mouseup', () => {
     }
 });
 
-// --- DOKUNMATİK DESTEĞİ ---
+// --- DOKUNMATİK / TABLET PICH-ZOOM ---
 viewport.addEventListener('touchstart', (e) => {
     if (e.touches.length === 2) {
         initialTouchDist = Math.hypot(
             e.touches[0].clientX - e.touches[1].clientX,
             e.touches[0].clientY - e.touches[1].clientY
         );
-    } else if (e.touches.length === 1 && currentMode === 'pan') {
+    } else if (e.touches.length === 1 && (currentMode === 'pan' || isSpacePressed)) {
         isPanning = true;
         startX = e.touches[0].clientX - panX;
         startY = e.touches[0].clientY - panY;
@@ -223,10 +190,14 @@ viewport.addEventListener('touchmove', (e) => {
             e.touches[0].clientX - e.touches[1].clientX,
             e.touches[0].clientY - e.touches[1].clientY
         );
+        const currentCenter = {
+            x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+            y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+        };
+
         if (initialTouchDist > 0) {
             const factor = currentDist / initialTouchDist;
-            scale = Math.min(Math.max(scale * (factor > 1 ? 1.05 : 0.95), 0.4), 5);
-            updateTransform();
+            zoomAtPoint(factor, currentCenter.x, currentCenter.y);
         }
         initialTouchDist = currentDist;
     } else if (e.touches.length === 1 && isPanning) {
@@ -236,11 +207,12 @@ viewport.addEventListener('touchmove', (e) => {
     }
 }, { passive: false });
 
-viewport.addEventListener('touchend', () => {
+viewport.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) initialTouchDist = 0;
     isPanning = false;
-    initialTouchDist = 0;
 });
 
+// --- ÇİZİM İŞLEMLERİ VE ÇAKIŞMA ÖNLEME ---
 function getCanvasCoordinates(e) {
     const rect = paintCanvas.getBoundingClientRect();
     const x = (e.clientX - rect.left) * (paintCanvas.width / rect.width);
@@ -323,6 +295,7 @@ function drawing(e) {
 
 function stopDraw() {
     isDrawing = false;
+    paintCtx.beginPath();
 }
 
 function drawOnCanvas(x, y, color, size = 4, mode = 'pen') {
@@ -343,21 +316,17 @@ function drawOnCanvas(x, y, color, size = 4, mode = 'pen') {
     paintCtx.moveTo(x, y);
 }
 
+// --- P2P BAĞLANTI VE ODA ---
 function generateRoomCode(length = 6) {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let result = '';
-    for (let i = 0; i < length; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
+    for (let i = 0; i < length; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
     return result;
 }
 
 function createRoom() {
     const sizeSelectVal = document.getElementById('canvas-size-select').value.split('x');
-    const selectedW = parseInt(sizeSelectVal[0]);
-    const selectedH = parseInt(sizeSelectVal[1]);
-    
-    setCanvasSize(selectedW, selectedH);
+    setCanvasSize(parseInt(sizeSelectVal[0]), parseInt(sizeSelectVal[1]));
 
     const shortRoomId = generateRoomCode(6);
     peer = new Peer(shortRoomId);
@@ -369,23 +338,17 @@ function createRoom() {
     });
 
     peer.on('error', (err) => {
-        if (err.type === 'unavailable-id') {
-            createRoom();
-        } else {
-            alert("Bağlantı hatası: " + err.type);
-        }
+        if (err.type === 'unavailable-id') createRoom();
+        else alert("Bağlantı hatası: " + err.type);
     });
 
     peer.on('connection', (connection) => {
         conn = connection;
-        
         conn.on('open', () => {
             conn.send({ type: 'init_size', w: paintCanvas.width, h: paintCanvas.height });
-            
             if (hasTemplate(templateCanvas)) {
                 conn.send({ type: 'resize_and_load', w: templateCanvas.width, h: templateCanvas.height, dataUrl: templateCanvas.toDataURL() });
             }
-
             if (hasDrawings(paintCanvas)) {
                 conn.send({ type: 'sync_paint_state', dataUrl: paintCanvas.toDataURL() });
             }
@@ -402,9 +365,8 @@ function copyCode() {
     const codeInput = document.getElementById('room-code-display');
     codeInput.select();
     navigator.clipboard.writeText(codeInput.value);
-    
     const feedback = document.getElementById('copy-feedback');
-    feedback.innerText = "Bağlantı kodu panoya kopyalandı! ✔️";
+    feedback.innerText = "Kopyalandı! ✔️";
     setTimeout(() => { feedback.innerText = ""; }, 2000);
 }
 
@@ -416,16 +378,11 @@ function closeModalToGame() {
 
 function joinRoom() {
     const roomID = document.getElementById('room-input').value.trim();
-    if (!roomID) {
-        alert("Lütfen geçerli bir oda kodu gir!");
-        return;
-    }
+    if (!roomID) { alert("Lütfen oda kodu gir!"); return; }
 
     peer = new Peer();
-    
     peer.on('open', () => {
         conn = peer.connect(roomID);
-        
         conn.on('open', () => {
             document.getElementById('menu-screen').classList.add('hidden');
             document.getElementById('game-screen').classList.remove('hidden');
@@ -440,9 +397,8 @@ function setupConnection() {
         if (data.type === 'start') {
             paintCtx.beginPath();
             paintCtx.moveTo(data.x, data.y);
-            if (data.mode === 'eraser') {
-                paintCtx.globalCompositeOperation = 'destination-out';
-            } else {
+            if (data.mode === 'eraser') paintCtx.globalCompositeOperation = 'destination-out';
+            else {
                 paintCtx.globalCompositeOperation = 'source-over';
                 paintCtx.strokeStyle = data.color;
             }
@@ -472,19 +428,13 @@ function setupConnection() {
 function clearCanvas(broadcast = true) {
     saveState();
     paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
-    
-    if (broadcast && conn && conn.open) {
-        conn.send({ type: 'clear_drawings' });
-    }
+    if (broadcast && conn && conn.open) conn.send({ type: 'clear_drawings' });
 }
 
 function removeTemplate() {
-    if (confirm("Şablonu tamamen kaldırmak istediğinize emin misiniz?")) {
+    if (confirm("Şablonu kaldırmak istediğine emin misin?")) {
         templateCtx.clearRect(0, 0, templateCanvas.width, templateCanvas.height);
-        
-        if (conn && conn.open) {
-            conn.send({ type: 'remove_template' });
-        }
+        if (conn && conn.open) conn.send({ type: 'remove_template' });
     }
 }
 
@@ -512,15 +462,11 @@ function downloadCanvas() {
     tempCanvas.width = paintCanvas.width;
     tempCanvas.height = paintCanvas.height;
     const tempCtx = tempCanvas.getContext('2d');
-
     tempCtx.fillStyle = '#ffffff';
     tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-
     tempCtx.drawImage(paintCanvas, 0, 0);
-
     tempCtx.globalCompositeOperation = 'multiply';
     tempCtx.drawImage(templateCanvas, 0, 0);
-    tempCtx.globalCompositeOperation = 'source-over';
 
     const link = document.createElement('a');
     link.download = 'ortak-cizim-eserimiz.png';
@@ -528,26 +474,20 @@ function downloadCanvas() {
     link.click();
 }
 
-// Günün Şablonu Yükleme Mantığı
 function loadDailyTemplate() {
     const now = new Date();
     const start = new Date(now.getFullYear(), 0, 0);
     const diff = (now - start) + ((start.getTimezoneOffset() - now.getTimezoneOffset()) * 60 * 1000);
-    const oneDay = 1000 * 60 * 60 * 24;
-    const dayOfYear = Math.floor(diff / oneDay);
-
-    const selectedTemplateUrl = dailyTemplates[dayOfYear % dailyTemplates.length];
-    loadPresetTemplate(selectedTemplateUrl);
+    const dayOfYear = Math.floor(diff / (1000 * 60 * 60 * 24));
+    loadPresetTemplate(dailyTemplates[dayOfYear % dailyTemplates.length]);
 }
 
 function loadPresetTemplate(imageUrl) {
     const img = new Image();
     img.crossOrigin = "Anonymous";
-    
     img.onload = function() {
         const origW = img.naturalWidth || img.width;
         const origH = img.naturalHeight || img.height;
-
         setCanvasSize(origW, origH);
 
         const tempCanvas = document.createElement('canvas');
@@ -555,37 +495,25 @@ function loadPresetTemplate(imageUrl) {
         tempCanvas.height = origH;
         const tempCtx = tempCanvas.getContext('2d');
         tempCtx.drawImage(img, 0, 0, origW, origH);
-
         const optimizedDataUrl = tempCanvas.toDataURL('image/jpeg', 0.85);
 
         loadTemplateFromUrl(optimizedDataUrl);
-
         if (conn && conn.open) {
-            conn.send({ 
-                type: 'resize_and_load', 
-                w: origW, 
-                h: origH, 
-                dataUrl: optimizedDataUrl 
-            });
+            conn.send({ type: 'resize_and_load', w: origW, h: origH, dataUrl: optimizedDataUrl });
         }
     }
     img.src = imageUrl;
 }
 
-const imageLoader = document.getElementById('imageLoader');
-imageLoader.addEventListener('change', handleImageUpload);
-
-function handleImageUpload(e) {
+document.getElementById('imageLoader').addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
-    reader.onload = function(event) {
+    reader.onload = (event) => {
         const img = new Image();
         img.onload = function() {
             const origW = img.naturalWidth || img.width;
             const origH = img.naturalHeight || img.height;
-
             setCanvasSize(origW, origH);
 
             const tempCanvas = document.createElement('canvas');
@@ -593,24 +521,17 @@ function handleImageUpload(e) {
             tempCanvas.height = origH;
             const tempCtx = tempCanvas.getContext('2d');
             tempCtx.drawImage(img, 0, 0, origW, origH);
-
             const optimizedDataUrl = tempCanvas.toDataURL('image/jpeg', 0.85);
 
             loadTemplateFromUrl(optimizedDataUrl);
-
             if (conn && conn.open) {
-                conn.send({ 
-                    type: 'resize_and_load', 
-                    w: origW, 
-                    h: origH, 
-                    dataUrl: optimizedDataUrl 
-                });
+                conn.send({ type: 'resize_and_load', w: origW, h: origH, dataUrl: optimizedDataUrl });
             }
         }
         img.src = event.target.result;
     }
     reader.readAsDataURL(file);
-}
+});
 
 function loadTemplateFromUrl(dataUrl) {
     const img = new Image();
@@ -623,14 +544,12 @@ function loadTemplateFromUrl(dataUrl) {
 
 function hasTemplate(canvas) {
     const blank = document.createElement('canvas');
-    blank.width = canvas.width;
-    blank.height = canvas.height;
+    blank.width = canvas.width; blank.height = canvas.height;
     return canvas.toDataURL() !== blank.toDataURL();
 }
 
 function hasDrawings(canvas) {
     const blank = document.createElement('canvas');
-    blank.width = canvas.width;
-    blank.height = canvas.height;
+    blank.width = canvas.width; blank.height = canvas.height;
     return canvas.toDataURL() !== blank.toDataURL();
 }
