@@ -33,15 +33,28 @@ let pinch = null;
 
 let historyStack = [];
 let redoStack = [];
-const MAX_HISTORY = 25;
+const MAX_HISTORY = 12;
+
+// Çözünürlük: koordinatlar (LW x LH) sabit kalır, tuvalin iç çözünürlüğü RES kat büyür
+let LW = 600, LH = 600, RES = 1;
+const MAX_BACKING = 1800;   // tuvalin en uzun kenarı için iç piksel sınırı
+const LOGICAL_MAX = 1000;   // şablonun koordinat sistemindeki en uzun kenarı
 
 // Şablon
-const MAX_TEMPLATE_DIM = 1200;   // büyük resimleri küçült (hız + ağ için)
+const MAX_TEMPLATE_DIM = 3000;   // şablon resminin saklanan en büyük boyutu
+const TEMPLATE_BACKING = 3000;   // şablon katmanının iç çözünürlük sınırı
+let TRES = 1;
 const CHUNK = 16000;             // şablon parça boyutu (karakter)
 let currentTemplate = null;      // {kind:'url', url} | {kind:'data', w, h, dataUrl}
 const tplBuffers = {};
 
-const dailyTemplates = ["https://i.imgur.com/NAhN7ge.jpg"];
+// Şablon listesi: buraya 4 şablonunu ekle (name = pencerede görünen ad)
+const templates = [
+    { name: "Şablon 1", url: "https://i.imgur.com/ZSCMCOD.jpeg" },
+    { name: "Şablon 2", url: "https://i.imgur.com/qo0QiMZ.jpeg" },
+    { name: "Şablon 3", url: "https://i.imgur.com/dREqtmW.jpeg" },
+    { name: "Şablon 4", url: "https://i.imgur.com/m0zzHBR.jpeg" }
+].filter(t => t.url);
 
 // ---------- Araçlar ----------
 $('colorPicker').addEventListener('input', (e) => {
@@ -64,9 +77,26 @@ function setMode(mode) {
 }
 
 // ---------- Geçmiş ----------
+function snapshot() {
+    const c = document.createElement('canvas');
+    c.width = paintCanvas.width; c.height = paintCanvas.height;
+    c.getContext('2d').drawImage(paintCanvas, 0, 0);
+    return c;
+}
+
+function restoreSnapshot(snap, callback) {
+    paintCtx.save();
+    paintCtx.setTransform(1, 0, 0, 1, 0, 0);
+    paintCtx.globalCompositeOperation = 'source-over';
+    paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
+    paintCtx.drawImage(snap, 0, 0);
+    paintCtx.restore();
+    if (callback) callback();
+}
+
 function saveState() {
     if (!paintCanvas.width || !paintCanvas.height) return;
-    historyStack.push(paintCanvas.toDataURL());
+    historyStack.push(snapshot());
     if (historyStack.length > MAX_HISTORY) historyStack.shift();
     redoStack = [];
 }
@@ -77,27 +107,31 @@ function syncPaintToPeer() {
 
 function undo() {
     if (!historyStack.length) return;
-    redoStack.push(paintCanvas.toDataURL());
-    restoreCanvasState(historyStack.pop(), syncPaintToPeer);
+    redoStack.push(snapshot());
+    restoreSnapshot(historyStack.pop(), syncPaintToPeer);
 }
 
 function redo() {
     if (!redoStack.length) return;
-    historyStack.push(paintCanvas.toDataURL());
-    restoreCanvasState(redoStack.pop(), syncPaintToPeer);
+    historyStack.push(snapshot());
+    restoreSnapshot(redoStack.pop(), syncPaintToPeer);
 }
 
 function restoreCanvasState(dataUrl, callback) {
-    const img = new Image();
-    img.onload = () => {
-        paintCtx.save();
-        paintCtx.globalCompositeOperation = 'source-over';
-        paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
-        paintCtx.drawImage(img, 0, 0);
-        paintCtx.restore();
-        if (callback) callback();
-    };
-    img.src = dataUrl;
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            paintCtx.save();
+            paintCtx.globalCompositeOperation = 'source-over';
+            paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
+            paintCtx.drawImage(img, 0, 0, LW, LH);
+            paintCtx.restore();
+            if (callback) callback();
+            resolve();
+        };
+        img.onerror = resolve;
+        img.src = dataUrl;
+    });
 }
 
 // ---------- Zoom ----------
@@ -122,10 +156,10 @@ function zoomOut() { const r = viewport.getBoundingClientRect(); zoomAtPoint(0.8
 
 function resetZoom() {
     const w = viewport.clientWidth, h = viewport.clientHeight;
-    if (!w || !h || !paintCanvas.width) return;
-    scale = Math.min(w / paintCanvas.width, h / paintCanvas.height) * 0.95;
-    panX = (w - paintCanvas.width * scale) / 2;
-    panY = (h - paintCanvas.height * scale) / 2;
+    if (!w || !h || !LW) return;
+    scale = Math.min(w / LW, h / LH) * 0.95;
+    panX = (w - LW * scale) / 2;
+    panY = (h - LH * scale) / 2;
     updateTransform();
     container.style.opacity = '1';
 }
@@ -151,8 +185,8 @@ window.addEventListener('keyup', (e) => { if (e.code === 'Space') isSpacePressed
 function getCanvasCoordinates(e) {
     const rect = paintCanvas.getBoundingClientRect();
     return {
-        x: (e.clientX - rect.left) * (paintCanvas.width / rect.width),
-        y: (e.clientY - rect.top) * (paintCanvas.height / rect.height)
+        x: (e.clientX - rect.left) * (LW / rect.width),
+        y: (e.clientY - rect.top) * (LH / rect.height)
     };
 }
 
@@ -218,7 +252,7 @@ viewport.addEventListener('pointerup', endPointer);
 viewport.addEventListener('pointercancel', endPointer);
 
 // ---------- Çizim ----------
-function renderStroke(ctx, s, commit) {
+function renderStroke(ctx, s, commit, from = 0) {
     const erase = s.mode === 'eraser';
     const p = s.points;
     ctx.save();
@@ -231,9 +265,10 @@ function renderStroke(ctx, s, commit) {
     if (p.length === 1) {
         ctx.arc(p[0].x, p[0].y, s.size / 2, 0, Math.PI * 2);
         ctx.fill();
-    } else {
-        ctx.moveTo(p[0].x, p[0].y);
-        for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
+    } else if (from < p.length) {
+        const i0 = Math.max(from - 1, 0);
+        ctx.moveTo(p[i0].x, p[i0].y);
+        for (let i = i0 + 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
         ctx.stroke();
     }
     ctx.restore();
@@ -252,15 +287,25 @@ function startDraw(e) {
     }
 }
 
+let pending = [], flushTimer = null;
+
+function flushPoints() {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+    if (pending.length && conn && conn.open) conn.send({ type: 'draw', pts: pending });
+    pending = [];
+}
+
 function drawing(events) {
     if (!isDrawing || !myStroke) return;
+    const n0 = myStroke.points.length;
     for (const ev of events) {
         const c = getCanvasCoordinates(ev);
         myStroke.points.push(c);
-        if (conn && conn.open) conn.send({ type: 'draw', x: c.x, y: c.y });
+        pending.push([Math.round(c.x * 10) / 10, Math.round(c.y * 10) / 10]);
     }
-    clear(activeCtx, activeCanvas);
-    renderStroke(activeCtx, myStroke, false);
+    if (!flushTimer) flushTimer = setTimeout(flushPoints, 30);
+    renderStroke(activeCtx, myStroke, false, n0);
 }
 
 function stopDraw() {
@@ -269,6 +314,7 @@ function stopDraw() {
     if (myStroke) renderStroke(paintCtx, myStroke, true);
     clear(activeCtx, activeCanvas);
     myStroke = null;
+    flushPoints();
     if (conn && conn.open) conn.send({ type: 'stop' });
 }
 
@@ -278,12 +324,20 @@ function cancelStroke() {
     myStroke = null;
     clear(activeCtx, activeCanvas);
     historyStack.pop();           // başlangıçta kaydedilen geçmişi geri al
+    pending = []; clearTimeout(flushTimer); flushTimer = null;
     if (conn && conn.open) conn.send({ type: 'cancel' });
 }
 
 // ---------- Karşı tarafın verileri ----------
+let dataQueue = Promise.resolve();
+
 function setupConnection() {
     conn.on('data', (d) => {
+        dataQueue = dataQueue.then(() => handleData(d)).catch(console.error);
+    });
+}
+
+function handleData(d) {
         switch (d.type) {
             case 'start':
                 remoteStroke = { points: [{ x: d.x, y: d.y }], color: d.color, size: d.size, mode: d.mode };
@@ -292,9 +346,11 @@ function setupConnection() {
                 break;
             case 'draw':
                 if (!remoteStroke) break;
-                remoteStroke.points.push({ x: d.x, y: d.y });
-                clear(remoteCtx, remoteCanvas);
-                renderStroke(remoteCtx, remoteStroke, false);
+                {
+                    const n0 = remoteStroke.points.length;
+                    for (const q of d.pts) remoteStroke.points.push({ x: q[0], y: q[1] });
+                    renderStroke(remoteCtx, remoteStroke, false, n0);
+                }
                 break;
             case 'stop':
                 if (remoteStroke) renderStroke(paintCtx, remoteStroke, true);
@@ -313,25 +369,23 @@ function setupConnection() {
                 clear(templateCtx, templateCanvas);
                 break;
             case 'init_size':
+                currentTemplate = null;
                 setCanvasSize(d.w, d.h);
                 break;
             case 'template_url':
-                applyTemplate({ kind: 'url', url: d.url });
-                break;
+                return applyTemplate({ kind: 'url', url: d.url });
             case 'tpl_chunk': {
                 const b = tplBuffers[d.id] || (tplBuffers[d.id] = { parts: [], got: 0 });
                 b.parts[d.i] = d.part;
                 if (++b.got === d.n) {
                     delete tplBuffers[d.id];
-                    applyTemplate({ kind: 'data', w: d.w, h: d.h, dataUrl: b.parts.join('') });
+                    return applyTemplate({ kind: 'data', w: d.w, h: d.h, dataUrl: b.parts.join('') });
                 }
                 break;
             }
             case 'sync_paint_state':
-                restoreCanvasState(d.dataUrl);
-                break;
+                return restoreCanvasState(d.dataUrl);
         }
-    });
 }
 
 function clearCanvas(broadcast = true) {
@@ -348,11 +402,18 @@ function removeTemplate() {
 }
 
 function setCanvasSize(w, h) {
-    [paintCanvas, activeCanvas, remoteCanvas, templateCanvas].forEach(cv => {
-        cv.width = w; cv.height = h;
+    LW = w; LH = h;
+    RES = Math.max(1, Math.min(2, MAX_BACKING / Math.max(w, h)));
+    TRES = Math.max(1, Math.min(3, TEMPLATE_BACKING / Math.max(w, h)));
+    [[paintCanvas, RES], [activeCanvas, RES], [remoteCanvas, RES], [templateCanvas, TRES]].forEach(([cv, r]) => {
+        cv.width = Math.round(w * r); cv.height = Math.round(h * r);
         cv.style.width = w + 'px'; cv.style.height = h + 'px';
     });
-    [paintCtx, activeCtx, remoteCtx, templateCtx].forEach(c => c.imageSmoothingEnabled = true);
+    [[paintCtx, RES], [activeCtx, RES], [remoteCtx, RES], [templateCtx, TRES]].forEach(([c, r]) => {
+        c.setTransform(r, 0, 0, r, 0, 0);
+        c.imageSmoothingEnabled = true;
+    });
+    templateCtx.imageSmoothingQuality = 'high';
     container.style.width = w + 'px';
     container.style.height = h + 'px';
     historyStack = []; redoStack = [];
@@ -362,11 +423,11 @@ function setCanvasSize(w, h) {
 
 function downloadCanvas() {
     const t = document.createElement('canvas');
-    t.width = paintCanvas.width; t.height = paintCanvas.height;
+    t.width = templateCanvas.width; t.height = templateCanvas.height;
     const c = t.getContext('2d');
     c.fillStyle = '#ffffff';
     c.fillRect(0, 0, t.width, t.height);
-    c.drawImage(paintCanvas, 0, 0);
+    c.drawImage(paintCanvas, 0, 0, t.width, t.height);
     c.globalCompositeOperation = 'multiply';
     c.drawImage(templateCanvas, 0, 0);
     const a = document.createElement('a');
@@ -393,16 +454,21 @@ function cleanAndOptimizeTemplate(img) {
         if (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2] > 235) d[i] = d[i + 1] = d[i + 2] = 255;
     }
     ctx.putImageData(imgData, 0, 0);
-    return { dataUrl: cv.toDataURL('image/png'), w, h };
+    const k2 = Math.min(1, LOGICAL_MAX / Math.max(w, h));
+    return { dataUrl: cv.toDataURL('image/png'), w: Math.round(w * k2), h: Math.round(h * k2) };
 }
 
 function drawTemplateData(dataUrl) {
-    const img = new Image();
-    img.onload = () => {
-        clear(templateCtx, templateCanvas);
-        templateCtx.drawImage(img, 0, 0, templateCanvas.width, templateCanvas.height);
-    };
-    img.src = dataUrl;
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            clear(templateCtx, templateCanvas);
+            templateCtx.drawImage(img, 0, 0, LW, LH);
+            resolve();
+        };
+        img.onerror = resolve;
+        img.src = dataUrl;
+    });
 }
 
 // Şablonu bu cihazda uygula (hem benim hem karşı taraf için aynı fonksiyon)
@@ -410,19 +476,20 @@ function applyTemplate(t) {
     if (t.kind === 'data') {
         currentTemplate = t;
         setCanvasSize(t.w, t.h);
-        drawTemplateData(t.dataUrl);
-        return;
+        return drawTemplateData(t.dataUrl);
     }
-    const img = new Image();
-    img.crossOrigin = "Anonymous";
-    img.onload = () => {
-        const r = cleanAndOptimizeTemplate(img);
-        currentTemplate = t;
-        setCanvasSize(r.w, r.h);
-        drawTemplateData(r.dataUrl);
-    };
-    img.onerror = () => { $('status').innerText = "Şablon yüklenemedi ⚠️"; };
-    img.src = t.url;
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.onload = () => {
+            const r = cleanAndOptimizeTemplate(img);
+            currentTemplate = t;
+            setCanvasSize(r.w, r.h);
+            drawTemplateData(r.dataUrl).then(resolve);
+        };
+        img.onerror = () => { $('status').innerText = "Şablon yüklenemedi ⚠️"; resolve(); };
+        img.src = t.url;
+    });
 }
 
 // Şablonu karşıya gönder (URL küçük; yüklenen dosya parçalara bölünür)
@@ -439,14 +506,30 @@ function sendTemplate(t) {
     }
 }
 
-function loadDailyTemplate() {
-    const now = new Date();
-    const start = new Date(now.getFullYear(), 0, 0);
-    const diff = (now - start) + ((start.getTimezoneOffset() - now.getTimezoneOffset()) * 60000);
-    const day = Math.floor(diff / 86400000);
-    const t = { kind: 'url', url: dailyTemplates[day % dailyTemplates.length] };
-    applyTemplate(t);
-    sendTemplate(t);
+function openTemplateModal() {
+    const grid = $('template-grid');
+    if (!grid.children.length) {
+        templates.forEach((t) => {
+            const b = document.createElement('button');
+            b.className = 'bg-slate-700 hover:bg-slate-600 rounded-xl p-2 flex flex-col gap-1.5 items-center';
+            b.innerHTML = '<img loading="lazy" class="w-full aspect-square object-contain bg-white rounded-lg"><span class="text-xs font-bold"></span>';
+            b.querySelector('img').src = t.url;
+            b.querySelector('span').textContent = t.name;
+            b.onclick = () => selectTemplate(t);
+            grid.appendChild(b);
+        });
+    }
+    $('template-modal').classList.remove('hidden');
+}
+
+function closeTemplateModal() { $('template-modal').classList.add('hidden'); }
+
+function selectTemplate(t) {
+    if (hasDrawings(paintCanvas) && !confirm("Şablon değişince mevcut çizimler silinir. Devam edilsin mi?")) return;
+    closeTemplateModal();
+    const tpl = { kind: 'url', url: t.url };
+    applyTemplate(tpl);
+    sendTemplate(tpl);
 }
 
 $('imageLoader').addEventListener('change', (e) => {
@@ -500,8 +583,7 @@ function showGame() {
 }
 
 function createRoom() {
-    const [w, h] = $('canvas-size-select').value.split('x').map(Number);
-    setCanvasSize(w, h);
+    setCanvasSize(600, 600);
 
     peer = new Peer(generateRoomCode(6), PEER_OPTIONS);
     peer.on('open', (id) => {
@@ -517,7 +599,7 @@ function createRoom() {
         conn = connection;
         setupConnection();
         conn.on('open', () => {
-            conn.send({ type: 'init_size', w: paintCanvas.width, h: paintCanvas.height });
+            conn.send({ type: 'init_size', w: LW, h: LH });
             sendTemplate(currentTemplate);
             if (hasDrawings(paintCanvas)) syncPaintToPeer();
         });
@@ -553,4 +635,15 @@ function joinRoom() {
             $('status').innerText = "Bağlantı sağlandı, çizebilirsiniz! 🎉";
         });
     });
+}
+
+// ---------- Tuval boyutu menüsü ----------
+function openSizeModal() { $('size-modal').classList.remove('hidden'); }
+function closeSizeModal() { $('size-modal').classList.add('hidden'); }
+
+function changeCanvasSize(w, h) {
+    closeSizeModal();
+    currentTemplate = null;
+    setCanvasSize(w, h);   // çizimler ve şablon temizlenir
+    if (conn && conn.open) conn.send({ type: 'init_size', w, h });
 }
