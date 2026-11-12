@@ -14,15 +14,6 @@
     <!-- GİRİŞ EKRANI -->
     <div id="menu-screen" class="flex flex-col gap-4 text-center bg-slate-800 p-8 rounded-2xl shadow-xl border border-slate-700 w-[90vw] max-w-sm">
         <h1 class="text-3xl font-extrabold text-pink-500">🎨 Ortak Çizim</h1>
-        
-        <div class="flex flex-col gap-1 text-left">
-            <label class="text-xs text-slate-400 font-semibold">Varsayılan Tuval Boyutu:</label>
-            <select id="canvas-size-select" class="p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white outline-none focus:border-pink-500">
-                <option value="400x400">Küçük (400 x 400)</option>
-                <option value="600x600" selected>Orta (600 x 600)</option>
-                <option value="800x600">Büyük (800 x 600)</option>
-            </select>
-        </div>
 
         <button onclick="createRoom()" class="bg-blue-600 hover:bg-blue-500 p-3 rounded-xl font-bold transition shadow-lg mt-2">Oda Kur (Host Ol)</button>
         
@@ -52,6 +43,27 @@
         </div>
     </div>
 
+    <!-- ŞABLON SEÇİM PENCERESİ -->
+    <div id="template-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div class="bg-slate-800 p-5 rounded-2xl border border-slate-700 w-[92vw] max-w-md max-h-[90vh] overflow-y-auto flex flex-col gap-3 shadow-2xl">
+            <h2 class="text-lg font-bold text-pink-400 text-center">Şablon Seç</h2>
+            <div id="template-grid" class="grid grid-cols-2 gap-3"></div>
+            <button onclick="closeTemplateModal()" class="text-slate-400 hover:text-white text-sm p-1">Vazgeç</button>
+        </div>
+    </div>
+
+    <!-- TUVAL BOYUTU MENÜSÜ -->
+    <div id="size-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 w-[90vw] max-w-sm text-center flex flex-col gap-3 shadow-2xl">
+            <h2 class="text-lg font-bold text-pink-400">Tuval Boyutu</h2>
+            <p class="text-xs text-slate-400">Boyut değişince çizimler ve şablon silinir. Değişiklik iki oyuncuda da uygulanır.</p>
+            <button onclick="changeCanvasSize(400,400)" class="bg-slate-700 hover:bg-slate-600 p-2.5 rounded-xl font-bold text-sm">Küçük (400 x 400)</button>
+            <button onclick="changeCanvasSize(600,600)" class="bg-slate-700 hover:bg-slate-600 p-2.5 rounded-xl font-bold text-sm">Orta (600 x 600)</button>
+            <button onclick="changeCanvasSize(800,600)" class="bg-slate-700 hover:bg-slate-600 p-2.5 rounded-xl font-bold text-sm">Büyük (800 x 600)</button>
+            <button onclick="closeSizeModal()" class="text-slate-400 hover:text-white text-sm p-1">Vazgeç</button>
+        </div>
+    </div>
+
     <!-- OYUN & ÇİZİM EKRANI -->
     <div id="game-screen" class="hidden flex flex-col items-center justify-between w-full h-full p-2 overflow-hidden relative">
         
@@ -60,7 +72,8 @@
             <div id="status" class="text-yellow-400 font-semibold text-xs truncate min-w-0 mr-2">Bağlantı bekleniyor...</div>
             
             <div class="flex items-center gap-1.5 shrink-0">
-                <button onclick="loadDailyTemplate()" class="bg-gradient-to-r from-pink-600 to-purple-600 px-3 py-2 sm:py-1 rounded-lg font-bold text-white text-xs">✨<span class="hidden sm:inline"> Şablon</span></button>
+                <button onclick="openSizeModal()" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 sm:py-1 rounded-lg font-bold text-slate-200 text-xs">📐<span class="hidden sm:inline"> Boyut</span></button>
+                <button onclick="openTemplateModal()" class="bg-gradient-to-r from-pink-600 to-purple-600 px-3 py-2 sm:py-1 rounded-lg font-bold text-white text-xs">✨<span class="hidden sm:inline"> Şablon</span></button>
                 
                 <label class="bg-slate-700 hover:bg-slate-600 px-3 py-2 sm:py-1 rounded-lg font-bold cursor-pointer text-slate-200 text-xs">
                     📁<span class="hidden sm:inline"> Yükle</span> <input type="file" id="imageLoader" accept="image/*" class="hidden">
