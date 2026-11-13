@@ -167,13 +167,15 @@ function restoreCanvasState(dataUrl, callback) {
 }
 
 // ---------- Zoom ----------
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 16;   // zor şablonlar için yüksek zoom (eskiden 8)
 function updateTransform() {
     container.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
     $('zoom-level').innerText = `${Math.round(scale * 100)}%`;
 }
 
 function zoomAtPoint(factor, clientX, clientY) {
-    const newScale = Math.min(Math.max(scale * factor, 0.2), 8);
+    const newScale = Math.min(Math.max(scale * factor, MIN_ZOOM), MAX_ZOOM);
     if (newScale === scale) return;
     const rect = viewport.getBoundingClientRect();
     const x = clientX - rect.left, y = clientY - rect.top;
@@ -212,6 +214,15 @@ window.addEventListener('keydown', (e) => {
     }
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'Space') isSpacePressed = false; });
+
+// Ctrl+Z geri al, Ctrl+Y / Ctrl+Shift+Z ileri al (Mac'te Cmd)
+window.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || isDrawing) return;
+    if (document.activeElement && document.activeElement.matches('input[type=text], textarea')) return;
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+});
 
 // ---------- Girdi (mouse + dokunma + kalem tek sistemde) ----------
 function getCanvasCoordinates(e) {
@@ -284,6 +295,10 @@ viewport.addEventListener('pointerup', endPointer);
 viewport.addEventListener('pointercancel', endPointer);
 
 // ---------- Çizim ----------
+// Kenar yumuşatma pikselleri yarı saydam olduğu için çizgi birkaç kez çizilir:
+// 1 = eski görünüm, 2 = daha dolgun kenar, 3 = en dolgun
+const EDGE_PASSES = 2;
+
 function renderStroke(ctx, s, commit, from = 0) {
     const erase = s.mode === 'eraser';
     const p = s.points;
@@ -296,17 +311,26 @@ function renderStroke(ctx, s, commit, from = 0) {
     ctx.beginPath();
     if (p.length === 1) {
         ctx.arc(p[0].x, p[0].y, s.size / 2, 0, Math.PI * 2);
-        ctx.fill();
+        for (let i = 0; i < EDGE_PASSES; i++) ctx.fill();
     } else if (from < p.length) {
         const i0 = Math.max(from - 1, 0);
         ctx.moveTo(p[i0].x, p[i0].y);
         for (let i = i0 + 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
-        ctx.stroke();
+        for (let i = 0; i < EDGE_PASSES; i++) ctx.stroke();
     }
     ctx.restore();
 }
 
 const clear = (ctx, cv) => ctx.clearRect(0, 0, cv.width, cv.height);
+
+// Katmandaki çizgiyi tuvale AYNEN işler (önizleme ile sonuç birebir aynı olur)
+function commitLayer(layer, stroke) {
+    paintCtx.save();
+    paintCtx.setTransform(1, 0, 0, 1, 0, 0);
+    paintCtx.globalCompositeOperation = stroke.mode === 'eraser' ? 'destination-out' : 'source-over';
+    paintCtx.drawImage(layer, 0, 0);
+    paintCtx.restore();
+}
 
 function startDraw(e) {
     isDrawing = true;
@@ -343,7 +367,7 @@ function drawing(events) {
 function stopDraw() {
     if (!isDrawing) return;
     isDrawing = false;
-    if (myStroke) renderStroke(paintCtx, myStroke, true);
+    if (myStroke) commitLayer(activeCanvas, myStroke);
     clear(activeCtx, activeCanvas);
     myStroke = null;
     flushPoints();
@@ -385,7 +409,7 @@ function handleData(d) {
                 }
                 break;
             case 'stop':
-                if (remoteStroke) renderStroke(paintCtx, remoteStroke, true);
+                if (remoteStroke) commitLayer(remoteCanvas, remoteStroke);
                 clear(remoteCtx, remoteCanvas);
                 remoteStroke = null;
                 break;
