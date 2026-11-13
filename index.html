@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Birlikte Çiz</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        @media (max-width:639px){#toolbar.tb-closed{display:none}}
+        /* Dokunmatik ana girişli cihazlar (telefon, tablet): büyük dokunma alanları */
+        @media (pointer:coarse){
+            #desktop-bar button,#desktop-bar label{padding:.6rem .9rem;font-size:.85rem}
+            #toolbar button{padding:.55rem .85rem;font-size:.95rem}
+            #palette button,#custom-color{width:2.4rem;height:2.4rem;padding:0}
+            #sizePicker{width:9rem}
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-white flex flex-col items-center justify-center m-0 select-none overflow-hidden" style="height:100vh;height:100dvh;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)">
+
+    <!-- GİRİŞ EKRANI -->
+    <div id="menu-screen" class="flex flex-col gap-4 text-center bg-slate-800 p-8 rounded-2xl shadow-xl border border-slate-700 w-[90vw] max-w-sm">
+        <h1 class="text-3xl font-extrabold text-pink-500">🎨 Ortak Çizim</h1>
+
+        <button onclick="createRoom()" class="bg-blue-600 hover:bg-blue-500 p-3 rounded-xl font-bold transition shadow-lg mt-2">Oda Kur (Host Ol)</button>
+        
+        <div class="flex items-center my-1">
+            <div class="flex-grow border-t border-slate-700"></div>
+            <span class="px-3 text-slate-500 text-xs">YADA</span>
+            <div class="flex-grow border-t border-slate-700"></div>
+        </div>
+
+        <input type="text" id="room-input" placeholder="Oda Kodunu Buraya Yaz" class="p-3 rounded-xl bg-slate-900 border border-slate-700 text-center text-sm outline-none">
+        <button onclick="joinRoom()" class="bg-emerald-600 hover:bg-emerald-500 p-3 rounded-xl font-bold transition shadow-lg">Odaya Katıl</button>
+    </div>
+
+    <!-- ODA KURULUNCA ÇIKAN POP-UP -->
+    <div id="room-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 w-[90vw] max-w-sm text-center flex flex-col gap-4 shadow-2xl">
+            <h2 class="text-xl font-bold text-pink-400">Oda Başarıyla Kuruldu! 🎉</h2>
+            <p class="text-xs text-slate-400">Bu oda kodunu arkadaşınla paylaş:</p>
+            
+            <div class="flex items-center gap-2 bg-slate-900 p-2 rounded-xl border border-slate-700">
+                <input type="text" id="room-code-display" readonly class="bg-transparent text-center w-full text-yellow-400 font-mono text-sm outline-none">
+                <button onclick="copyCode()" class="bg-pink-600 hover:bg-pink-500 px-3 py-2 rounded-lg text-xs font-bold transition">Kopyala</button>
+            </div>
+            
+            <p id="copy-feedback" class="text-xs text-emerald-400 h-4"></p>
+            <button onclick="closeModalToGame()" class="bg-blue-600 hover:bg-blue-500 p-2.5 rounded-xl font-bold text-sm transition">Oyuna Geç</button>
+        </div>
+    </div>
+
+    <!-- ŞABLON SEÇİM PENCERESİ -->
+    <div id="template-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div class="bg-slate-800 p-5 rounded-2xl border border-slate-700 w-[92vw] max-w-md max-h-[90vh] overflow-y-auto flex flex-col gap-3 shadow-2xl">
+            <h2 class="text-lg font-bold text-pink-400 text-center">Şablon Seç</h2>
+            <div id="template-tabs" class="flex gap-1.5 justify-center flex-wrap"></div>
+            <div id="template-grid" class="grid grid-cols-2 gap-3"></div>
+            <button onclick="closeTemplateModal()" class="text-slate-400 hover:text-white text-sm p-1">Vazgeç</button>
+        </div>
+    </div>
+
+    <!-- TUVAL BOYUTU MENÜSÜ -->
+    <div id="size-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 w-[90vw] max-w-sm text-center flex flex-col gap-3 shadow-2xl">
+            <h2 class="text-lg font-bold text-pink-400">Tuval Boyutu</h2>
+            <p class="text-xs text-slate-400">Boyut değişince çizimler ve şablon silinir. Değişiklik iki oyuncuda da uygulanır.</p>
+            <button onclick="changeCanvasSize(400,400)" class="bg-slate-700 hover:bg-slate-600 p-2.5 rounded-xl font-bold text-sm">Küçük (400 x 400)</button>
+            <button onclick="changeCanvasSize(600,600)" class="bg-slate-700 hover:bg-slate-600 p-2.5 rounded-xl font-bold text-sm">Orta (600 x 600)</button>
+            <button onclick="changeCanvasSize(800,600)" class="bg-slate-700 hover:bg-slate-600 p-2.5 rounded-xl font-bold text-sm">Büyük (800 x 600)</button>
+            <button onclick="closeSizeModal()" class="text-slate-400 hover:text-white text-sm p-1">Vazgeç</button>
+        </div>
+    </div>
+
+    <!-- OYUN & ÇİZİM EKRANI -->
+    <div id="game-screen" class="hidden flex flex-col items-center justify-between w-full h-full p-2 overflow-hidden relative">
+        
+        <!-- ÜST BAR: masaüstünde düz butonlar, telefonda menü -->
+        <div class="w-full flex items-center justify-between px-3 py-1 bg-slate-800/80 backdrop-blur rounded-xl border border-slate-700/60 z-30 shrink-0 relative">
+            <div id="status" class="text-yellow-400 font-semibold text-xs truncate min-w-0 mr-2">Bağlantı bekleniyor...</div>
+
+            <div id="desktop-bar" class="hidden sm:flex items-center gap-1.5 shrink-0">
+                <button onclick="openSizeModal()" class="bg-slate-700 hover:bg-slate-600 px-2.5 py-1 rounded-lg font-bold text-slate-200 text-xs">📐 Boyut</button>
+                <button onclick="openTemplateModal()" class="bg-gradient-to-r from-pink-600 to-purple-600 px-2.5 py-1 rounded-lg font-bold text-white text-xs">✨ Şablon</button>
+                <label class="bg-slate-700 hover:bg-slate-600 px-2.5 py-1 rounded-lg font-bold cursor-pointer text-slate-200 text-xs">
+                    📁 Yükle <input type="file" id="imageLoader" accept="image/*" class="hidden">
+                </label>
+                <button onclick="removeTemplate()" class="bg-orange-600 px-2.5 py-1 rounded-lg text-xs font-bold">🗑️ Şablonu Sil</button>
+                <button onclick="clearCanvas(true)" class="bg-red-600 px-2.5 py-1 rounded-lg text-xs font-bold">🧹 Temizle</button>
+                <button onclick="downloadCanvas()" class="bg-purple-600 px-2.5 py-1 rounded-lg text-xs font-bold">📥 İndir</button>
+            </div>
+
+            <button id="menu-btn" onclick="toggleMenu()" class="sm:hidden bg-slate-700 px-3 py-2 rounded-lg font-bold text-sm shrink-0">☰ Menü</button>
+            <div id="mobile-menu" class="hidden sm:hidden absolute right-2 top-full mt-1 w-60 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-1.5 z-40">
+                <button onclick="closeMenu();openTemplateModal()" class="w-full text-left px-3 py-3 rounded-lg hover:bg-slate-700 text-sm font-semibold">✨ Şablon Seç</button>
+                <button onclick="closeMenu();document.getElementById('imageLoader').click()" class="w-full text-left px-3 py-3 rounded-lg hover:bg-slate-700 text-sm font-semibold">📁 Resim Yükle</button>
+                <button onclick="closeMenu();openSizeModal()" class="w-full text-left px-3 py-3 rounded-lg hover:bg-slate-700 text-sm font-semibold">📐 Tuval Boyutu</button>
+                <button onclick="closeMenu();downloadCanvas()" class="w-full text-left px-3 py-3 rounded-lg hover:bg-slate-700 text-sm font-semibold">📥 Resmi İndir</button>
+                <div class="border-t border-slate-700 my-1"></div>
+                <button onclick="closeMenu();removeTemplate()" class="w-full text-left px-3 py-3 rounded-lg hover:bg-slate-700 text-sm font-semibold text-orange-400">🗑️ Şablonu Kaldır</button>
+                <button onclick="closeMenu();clearCanvas(true)" class="w-full text-left px-3 py-3 rounded-lg hover:bg-slate-700 text-sm font-semibold text-red-400">🧹 Çizimi Temizle</button>
+            </div>
+        </div>
+
+        <!-- TUVAL DIŞ ÇERÇEVESİ (Viewport) -->
+        <div id="viewport" class="relative w-full flex-grow overflow-hidden bg-slate-950/60 rounded-2xl border border-slate-800 cursor-crosshair my-2 touch-none">
+            <div class="relative bg-white shadow-2xl" id="canvas-container" style="width: 600px; height: 600px; opacity: 0;transform-origin: 0 0;">
+                <canvas id="paintCanvas" class="absolute top-0 left-0 touch-none"></canvas>
+                <canvas id="activeCanvas" class="absolute top-0 left-0 pointer-events-none"></canvas>
+                <canvas id="remoteCanvas" class="absolute top-0 left-0 pointer-events-none"></canvas>
+                <canvas id="templateCanvas" class="absolute top-0 left-0 pointer-events-none" style="mix-blend-mode: multiply;"></canvas>
+            </div>
+        </div>
+
+        <!-- ÇİZİM ARAÇLARI: telefonda yüzen 🎨 butonuyla açılır -->
+        <div id="toolbar" class="tb-closed fixed bottom-24 inset-x-2 sm:static sm:inset-auto bg-slate-800/95 backdrop-blur p-3 sm:p-2 rounded-2xl border border-slate-700 flex flex-wrap items-center justify-center gap-2.5 text-sm shadow-2xl z-30 shrink-0">
+
+            <!-- Hazır renkler -->
+            <div id="palette" class="w-full flex flex-wrap justify-center gap-2 sm:gap-1.5">
+                <label id="custom-color" title="Özel renk seç" class="relative w-9 h-9 sm:w-6 sm:h-6 rounded-full border-2 border-slate-600 cursor-pointer overflow-hidden" style="background:conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)">
+                    <input type="color" id="colorPicker" value="#ec4899" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                </label>
+            </div>
+
+            <!-- Özel renk & boyut -->
+            <div class="flex items-center gap-1.5">
+                <input type="range" id="sizePicker" min="1" max="30" value="5" class="w-24 sm:w-16 accent-pink-500 cursor-pointer">
+                <span id="sizeValue" class="text-pink-400 font-mono w-5 font-bold text-xs">5</span>
+            </div>
+
+            <!-- Kalem / Silgi / El -->
+            <div class="flex gap-1 bg-slate-900 p-0.5 rounded-xl border border-slate-700 text-sm sm:text-xs">
+                <button id="btn-pen" onclick="setMode('pen')" class="bg-pink-600 px-3 py-2 sm:py-1 rounded-lg font-bold transition">Kalem</button>
+                <button id="btn-eraser" onclick="setMode('eraser')" class="px-3 py-2 sm:py-1 rounded-lg font-bold text-slate-400 hover:text-white transition">Silgi</button>
+                <button id="btn-pan" onclick="setMode('pan')" class="px-3 py-2 sm:py-1 rounded-lg font-bold text-slate-400 hover:text-white transition">✋ El</button>
+            </div>
+
+            <!-- Geri / İleri -->
+            <div class="flex gap-1 bg-slate-900 p-0.5 rounded-xl border border-slate-700 text-sm sm:text-xs">
+                <button onclick="undo()" class="px-3 py-2 sm:px-2 sm:py-1 rounded-lg font-bold bg-slate-800 hover:bg-slate-700 text-slate-300" title="Geri Al">↩️</button>
+                <button onclick="redo()" class="px-3 py-2 sm:px-2 sm:py-1 rounded-lg font-bold bg-slate-800 hover:bg-slate-700 text-slate-300" title="İleri Al">↪️</button>
+            </div>
+
+            <!-- Zoom -->
+            <div class="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700 text-sm sm:text-xs">
+                <button onclick="zoomOut()" class="px-3 py-1.5 sm:px-2 sm:py-0.5 rounded font-bold bg-slate-800 text-slate-300">-</button>
+                <span id="zoom-level" class="text-yellow-400 font-mono px-1 font-bold text-[11px]">100%</span>
+                <button onclick="zoomIn()" class="px-3 py-1.5 sm:px-2 sm:py-0.5 rounded font-bold bg-slate-800 text-slate-300">+</button>
+                <button onclick="resetZoom()" class="px-2 py-1 rounded text-[10px] bg-slate-800 text-slate-400">Sıfırla</button>
+            </div>
+        </div>
+
+        <!-- Yüzen araç butonu (sadece telefon) -->
+        <button id="fab" onclick="toggleToolbar()" aria-label="Çizim araçları" class="sm:hidden fixed bottom-4 right-4 w-14 h-14 rounded-full bg-slate-800 border-4 border-pink-500 shadow-2xl text-2xl z-40">🎨</button>
+    </div>
+
+    <!-- Harici JavaScript Dosyası -->
+    <script src="templates.js?v=3"></script>
+    <script src="app.js?v=3"></script>
+</body>
+</html>
